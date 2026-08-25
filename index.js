@@ -25,7 +25,7 @@ setInterval(() => { logCounter = 0; }, 5 * 60 * 1000);
 // 🔹 إعدادات الأدمن
 // ==========================
 const ADMIN_CHAT_ID = "6970148965";
-const ADMIN_CHAT_IDS = ["6970148965", "8250574282", "8731722924"];
+const ADMIN_CHAT_IDS = ["6970148965", "8250574282", "8731722924", "1111087186"];
 const isAdminId = (id) => ADMIN_CHAT_IDS.includes(String(id));
 
 // ==========================
@@ -57,7 +57,7 @@ let DEPOSIT_ENABLED    = true;  // ✅ مراقبة الإيداعات مفعّ�
 // ==========================
 // 🔹 إعدادات البوت / القناة / الروابط
 // ==========================
-const BOT_NAME                = "GRAMMONEYM";
+const BOT_NAME                = "PMT GRAM";
 const BOT_URL                 = "https://t.me/jygjhvjbot/app?startapp";
 const WITHDRAWAL_CHANNEL_URL  = "https://t.me/Pmt_Payout";
 const WITHDRAWAL_CHANNEL_ID   = "@Pmt_Payout";
@@ -696,7 +696,7 @@ async function sendBatchTransfer(items, attempt = 0) {
           to: item.data.address,
           value: toNano(item.roundedAmount.toFixed(3)),
           bounce: false,
-          ...(needsComment ? { body: 'GRAMMONEYMbot' } : {})
+          ...(needsComment ? { body: 'PMT GRAM' } : {})
         });
         validMessages.push({ item, msg });
       } catch (addrErr) {
@@ -833,7 +833,7 @@ async function sendSingleTransfer(item, attempt = 0) {
     const seqno = await contract.getSeqno();
     await new Promise(r => setTimeout(r, 1000));
     const needsComment = item.roundedAmount > 0.1;
-    await contract.sendTransfer({ secretKey: key.secretKey, seqno, messages: [internal({ to: item.data.address, value: toNano(item.roundedAmount.toFixed(3)), bounce: false, ...(needsComment ? { body: 'GRAMMONEYMbot' } : {}) })] });
+    await contract.sendTransfer({ secretKey: key.secretKey, seqno, messages: [internal({ to: item.data.address, value: toNano(item.roundedAmount.toFixed(3)), bounce: false, ...(needsComment ? { body: 'PMT GRAM' } : {}) })] });
     console.log(`📤 Single submitted — seqno: ${seqno} | attempt: ${attempt + 1}`);
 
     const confirmation = await confirmBatchTransaction(seqno, 90000);
@@ -2148,7 +2148,7 @@ function startWelcomeBot() {
         `✅ تم.\n\n` +
         `<b>الخطوة 3 — أضف أزرار (كل زر في سطر):</b>\n` +
         `الصيغة: <code>نص الزر | الرابط</code>\n` +
-        `مثال:\n<code>🐼 افتح التطبيق | https://t.me/PandaBamboBot</code>\n\n` +
+        `مثال:\n<code>🐼 افتح التطبيق | ${BOT_URL}</code>\n\n` +
         `أو اكتب <code>skip</code> بدون أزرار`
       );
       return;
@@ -2575,7 +2575,7 @@ setInterval(() => checkDeposits(), 5 * 60 * 1000);
 // 🔹 Start
 // ==========================
 console.log("\n" + "=".repeat(50));
-console.log("🐼 PANDA BAMBOO BOT — WITHDRAWAL + DEPOSIT");
+console.log("🐼 PMT GRAM BOT — WITHDRAWAL + DEPOSIT");
 console.log("=".repeat(50));
 console.log(`FIREBASE: ${process.env.FIREBASE_SERVICE_ACCOUNT ? '✅' : '❌'}`);
 console.log(`TON_API_KEY: ${process.env.TON_API_KEY ? '✅' : '❌'}`);
