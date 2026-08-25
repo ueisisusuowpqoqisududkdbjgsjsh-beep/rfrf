@@ -58,7 +58,7 @@ let DEPOSIT_ENABLED    = true;  // ✅ مراقبة الإيداعات مفعّ�
 // 🔹 إعدادات البوت / القناة / الروابط
 // ==========================
 const BOT_NAME                = "PMT GRAM";
-const BOT_URL                 = "https://t.me/jygjhvjbot/app?startapp";
+const BOT_URL                 = "https://t.me/Pmt_Gram_Bot/app";
 const WITHDRAWAL_CHANNEL_URL  = "https://t.me/Pmt_Payout";
 const WITHDRAWAL_CHANNEL_ID   = "@Pmt_Payout";
 const PAYMENT_IMAGE_URL       = "https://res.cloudinary.com/q1tmmkbe/image/upload/v1787631390/ChatGPT_Image_Aug_25_2026_07_17_31_AM.png";
