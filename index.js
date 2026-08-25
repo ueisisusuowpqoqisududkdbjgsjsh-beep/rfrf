@@ -52,16 +52,17 @@ let systemPaused          = false;
 // 🔹 تحكم في نظام السحب والإيداع
 // ==========================
 let WITHDRAWAL_ENABLED = true;
-let DEPOSIT_ENABLED    = false; // 🔒 خاصية فحص الإيداعات معطّلة — البوت يدفع السحوبات فقط
+let DEPOSIT_ENABLED    = true;  // ✅ مراقبة الإيداعات مفعّلة
 
 // ==========================
 // 🔹 إعدادات البوت / القناة / الروابط
 // ==========================
 const BOT_NAME                = "GRAMMONEYM";
-const BOT_URL                 = "https://t.me/GRAMMONEYMbot?startapp";
+const BOT_URL                 = "https://t.me/jygjhvjbot/app?startapp";
 const WITHDRAWAL_CHANNEL_URL  = "https://t.me/mjsjsjjsjisj";
 const WITHDRAWAL_CHANNEL_ID   = "@mjsjsjjsjisj"; // 👈 لو القناة خاصة استبدلها بالـ chat id الرقمي (مثال: -1001234567890)
-const WELCOME_IMAGE_URL       = "https://i.ibb.co/TMPJYfjH/Chat-GPT-Image-Aug-8-2026-03-56-45-AM.png";
+const PAYMENT_IMAGE_URL       = "https://res.cloudinary.com/q1tmmkbe/image/upload/v1787631390/ChatGPT_Image_Aug_25_2026_07_17_31_AM.png";
+const WELCOME_IMAGE_URL       = PAYMENT_IMAGE_URL;
 
 // ==========================
 // 🔹 دالة تقريب المبلغ
@@ -464,21 +465,25 @@ function maskUserId(userId) {
 function buildPayoutCaption(userId, amountTon) {
   const masked = maskUserId(userId);
   return (
-    `💎 <b>New TON Payout</b>\n\n` +
-    `🎉 A new withdrawal has been successfully completed!\n\n` +
+    `💎 <b>PAYMENT SENT</b>\n\n` +
+    `🚀 <b>Withdrawal Completed Successfully</b>\n\n` +
     `👤 <b>User:</b> <code>${masked}</code>\n` +
-    `💰 <b>Amount:</b> ${amountTon.toFixed(4)} TON\n` +
-    `✅ <b>Status:</b> Paid\n\n` +
-    `⚡ The payout was sent directly to the user's TON Wallet.\n` +
-    `🔗 Verified on-chain • Fast &amp; Transparent\n\n` +
-    `🏆 Another successful payout from GRAM!`
+    `💰 <b>Amount:</b> <code>${amountTon.toFixed(4)} TON</code>\n` +
+    `🟣 <b>Network:</b> TON\n` +
+    `✅ <b>Status:</b> <b>SUCCESSFUL</b>\n\n` +
+    `━━━━━━━━━━━━━━\n\n` +
+    `💎 Your reward has been processed and sent directly to your <b>TON Wallet</b>.\n\n` +
+    `🔗 <b>Transaction:</b> Verified On-Chain\n` +
+    `⚡ <b>Processing:</b> Fast &amp; Secure\n\n` +
+    `🏆 <b>PMT Gram</b>\n` +
+    `<i>Earn • Complete • Get Paid</i>`
   );
 }
 
 function buildPayoutKeyboard(txLink) {
   const keys = [];
   if (txLink) keys.push({ text: "🔍 View Transaction", url: txLink });
-  keys.push({ text: "🚀 Open Bot", url: BOT_URL });
+  keys.push({ text: "🚀 Open PMT Gram", url: BOT_URL });
   return { inline_keyboard: [keys] };
 }
 
@@ -492,7 +497,8 @@ async function sendUserNotification(chatId, amountTon, amountCoins, txHash) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         chat_id: chatId,
-        text: caption,
+        photo: PAYMENT_IMAGE_URL,
+        caption,
         parse_mode: 'HTML',
         reply_markup: buildPayoutKeyboard(txLink)
       }),
@@ -520,7 +526,8 @@ async function sendChannelNotification(items, txHash) {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           chat_id:      WITHDRAWAL_CHANNEL_ID,
-          text:         caption,
+          photo:        PAYMENT_IMAGE_URL,
+          caption,
           parse_mode:   'HTML',
           reply_markup: buildPayoutKeyboard(txLink)
         }),
@@ -970,7 +977,7 @@ async function unlockExpiredDailyLimits() {
 // ==========================
 async function checkDeposits() {
   if (!DEPOSIT_ENABLED) { console.log("⛔ Deposit system disabled — skipping check"); return; }
-  const wallet   = process.env.TON_WALLET_ADDRESS;
+  const wallet   = process.env.TON_WALLET_ADDRESS || "UQAACNWWtTtN7ILkhRERwYUTzo06Bd1Tv_8Yk5gPioIMFoUD";
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
   if (!wallet || !botToken) return;
 
@@ -990,9 +997,8 @@ async function checkDeposits() {
       let comment = tx.in_msg.message.trim();
       if (!comment) continue;
 
-      // استخراج userId من الكومنت — يدعم الشكلين:
-      //   الجديد: {"user_id":"7278991674","TG":"GRAMMONEYMbot"}
-      //   القديم: 7278991674
+      // استخراج userId من تعليق المعاملة — يدعم JSON، والرقم المباشر،
+      // وصيغة نظام PMT: Pmt Gram User ID: 123456789.
       let userId = null;
       if (comment.startsWith('{')) {
         try {
@@ -1001,8 +1007,9 @@ async function checkDeposits() {
             userId = String(parsed.user_id);
           }
         } catch (e) {}
-      } else if (/^\d+$/.test(comment)) {
-        userId = comment;
+      } else {
+        const idMatch = comment.match(/(?:Pmt\s+Gram\s+User\s+ID\s*:\s*)?(\d{5,})/i);
+        if (idMatch) userId = idMatch[1];
       }
       if (!userId) continue;
       const amountTon = Number(tx.in_msg.value) / 1e9;
@@ -1055,34 +1062,35 @@ async function checkDeposits() {
       const formattedTon    = amountTon.toFixed(6);
       const formattedNewBalance = newTonBalance.toFixed(6);
       const depositCaption =
-        `🔥 <b>RASEENRACING • DEPOSIT SUCCESSFUL</b> 🔥\n` +
-        `Your TON has arrived and you're ready to hit the track 🏍️⚡\n\n` +
-        `━━━━━━━━━━━━━━━━━━\n` +
-        `💎 <b>Deposit:</b> ${formattedTon} TON\n` +
-        `💰 <b>Balance:</b> ${formattedNewBalance} TON\n` +
-        `━━━━━━━━━━━━━━━━━━\n\n` +
-        `🏁 Upgrade your bike\n` +
-        `⚔️ Join PvP races\n` +
-        `⛏️ Start mining TON rewards\n\n` +
-        `The road to victory starts now 🚀\n\n` +
-        `🔗 <a href="${txLink}">View Transaction</a>`;
+        `💎 <b>DEPOSIT RECEIVED</b>\n\n` +
+        `🎉 <b>A new deposit has been confirmed!</b>\n\n` +
+        `👤 <b>User:</b> <code>${maskUserId(userId)}</code>\n` +
+        `💰 <b>Amount:</b> <code>${amountTon.toFixed(4)} TON</code>\n` +
+        `🟣 <b>Network:</b> TON\n` +
+        `✅ <b>Status:</b> <b>CONFIRMED</b>\n\n` +
+        `━━━━━━━━━━━━━━\n\n` +
+        `💎 The deposit has been successfully credited to the user's <b>PMT Gram</b> balance.\n\n` +
+        `🔗 <b>Transaction:</b> Verified On-Chain\n` +
+        `⚡ <b>Confirmation:</b> Fast &amp; Secure\n\n` +
+        `🏆 <b>PMT Gram</b>\n` +
+        `<i>Earn • Complete • Get Paid</i>`;
 
       await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           chat_id:    userId,
-          photo:      "https://res.cloudinary.com/dktppfipy/image/upload/v1779060536/deposit_glopgj.jpg",
+          photo:      PAYMENT_IMAGE_URL,
           caption:    depositCaption,
           parse_mode: "HTML",
           reply_markup: {
-            inline_keyboard: [[{ text: "🚀 Open", url: BOT_URL }]]
+             inline_keyboard: [[{ text: "🚀 Open PMT Gram", url: BOT_URL }]]
           }
         })
       });
       console.log(`📨 Deposit notification sent to user ${userId}`);
 
-      // 🔁 تعديل: إشعار الأدمن بالإيداع (بدون Bamboo)
+      // 🔁 إشعار الأدمن بالإيداع المؤكد
       const adminMessage =
         `💰 <b>إيداع جديد تم معالجته ✅</b>\n\n` +
         `━━━━━━━━━━━━━━━━\n` +
@@ -2578,9 +2586,9 @@ setInterval(async () => {
 }, BATCH_FLUSH_SECONDS * 1000);
 
 // ==========================
-// 🔹 فحص الإيداعات — معطّل (البوت يدفع السحوبات فقط)
+// 🔹 فحص الإيداعات — يعمل كل 5 دقائق
 // ==========================
-// setInterval(() => checkDeposits(), 5 * 60 * 1000);
+setInterval(() => checkDeposits(), 5 * 60 * 1000);
 
 // ==========================
 // 🔹 Start
@@ -2602,7 +2610,7 @@ getWallet().then(async () => {
   console.log(`💰 Wallet balance: ${b.toFixed(4)} TON`);
   if (WITHDRAWAL_ENABLED) await processPendingWithdrawals();
   else console.log("⛔ Withdrawal system disabled — skipping initial process");
-  // فحص الإيداعات معطّل — البوت يدفع السحوبات فقط
+  if (DEPOSIT_ENABLED) await checkDeposits();
 }).catch(err => { console.error("❌ Wallet error:", err.message); });
 
 setInterval(async () => {
