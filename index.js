@@ -59,8 +59,8 @@ let DEPOSIT_ENABLED    = true;  // ✅ مراقبة الإيداعات مفعّ�
 // ==========================
 const BOT_NAME                = "GRAMMONEYM";
 const BOT_URL                 = "https://t.me/jygjhvjbot/app?startapp";
-const WITHDRAWAL_CHANNEL_URL  = "https://t.me/mjsjsjjsjisj";
-const WITHDRAWAL_CHANNEL_ID   = "@mjsjsjjsjisj"; // 👈 لو القناة خاصة استبدلها بالـ chat id الرقمي (مثال: -1001234567890)
+const WITHDRAWAL_CHANNEL_URL  = "https://t.me/Pmt_Payout";
+const WITHDRAWAL_CHANNEL_ID   = "@Pmt_Payout";
 const PAYMENT_IMAGE_URL       = "https://res.cloudinary.com/q1tmmkbe/image/upload/v1787631390/ChatGPT_Image_Aug_25_2026_07_17_31_AM.png";
 const WELCOME_IMAGE_URL       = PAYMENT_IMAGE_URL;
 
@@ -493,7 +493,7 @@ async function sendUserNotification(chatId, amountTon, amountCoins, txHash) {
   const txLink  = txHash ? `https://tonscan.org/tx/${encodeURIComponent(txHash)}` : null;
   const caption = buildPayoutCaption(chatId, amountTon);
   try {
-    const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+    const res = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         chat_id: chatId,
@@ -522,7 +522,7 @@ async function sendChannelNotification(items, txHash) {
   for (const item of items) {
     const caption = buildPayoutCaption(item.userId, item.roundedAmount);
     try {
-      const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      const res = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           chat_id:      WITHDRAWAL_CHANNEL_ID,
@@ -1140,17 +1140,14 @@ function startWelcomeBot() {
     console.log(`👋 /start: ${chatId}`);
     const displayName = escapeHtml(msg.from?.first_name || msg.from?.username || 'صديقنا');
     const caption =
-      `🪙 <b>Welcome to ${BOT_NAME}, ${displayName}!</b>\n\n` +
-      `💵 Complete tasks. Earn USDT. Get rewarded in GRAM.\n\n` +
-      `✔️ <b>Complete Daily Tasks</b>\n` +
-      `Earn rewards instantly by completing simple tasks.\n\n` +
-      `⭐️ <b>Invite Friends</b>\n` +
-      `Earn from your referrals and keep receiving rewards from their activity.\n\n` +
-      `💎 <b>Fast &amp; Easy Withdrawals</b>\n` +
-      `Withdraw your earnings directly to your TON wallet.\n\n` +
-      `⚡ Fast payouts. Transparent rewards. Every payment is settled on-chain and can be publicly verified.\n\n` +
-      `🎮 Ready to start earning? Tap the button below to open the app and start completing tasks.\n\n` +
-      `📢 Referral and payout updates will be sent directly here.`;
+      `🪙 <b>Welcome to ${BOT_NAME}, ${displayName}!</b> 👑\n\n` +
+      `💎 Complete tasks, watch ads &amp; earn PMT rewards.\n\n` +
+      `🎯 <b>Daily Tasks</b> — Complete simple tasks and earn instantly.\n` +
+      `👥 <b>Invite Friends</b> — Earn from referrals and their activity.\n` +
+      `💰 <b>Fast Withdrawals</b> — Withdraw your earnings directly to your TON Wallet.\n\n` +
+      `⚡ Fast rewards • Transparent payouts • On-chain verified\n\n` +
+      `🚀 Ready to earn? Tap below and start now!\n\n` +
+      `📢 Your referral &amp; payout updates will appear here.`;
     try {
       await bot.sendPhoto(chatId,
         WELCOME_IMAGE_URL,
