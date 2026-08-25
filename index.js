@@ -903,10 +903,11 @@ async function processPendingWithdrawals() {
 
     if (!list.length) { console.log("📭 All pending already in processingQueue"); isProcessing = false; return; }
 
-    const mode = PROCESSING_MODE;
-    console.log(`\n📋 ${list.length} pending | Mode: ${mode.toUpperCase()} | BatchSize: ${BATCH_SIZE}`);
+    console.log(`\n📋 ${list.length} pending in queue — سيتم دفع طلب واحد فقط هذه الدورة`);
 
-    const validItems = [];
+    // نطلع أقدم طلب صالح بس وندفعه، والباقي بيستنى الدورة الجاية (كل دقيقة).
+    // ده بيمنع دفع أكتر من سحب في نفس اللحظة.
+    let chosen = null;
     for (const { id, data } of list) {
       processingQueue.add(id);
       const validation = await validateWithdrawal(id, data);
@@ -921,31 +922,14 @@ async function processPendingWithdrawals() {
 
       if (!locked) { console.log(`⏭️ ${id} already taken — skipping`); processingQueue.delete(id); continue; }
 
-      validItems.push({ id, data, roundedAmount: validation.roundedAmount, userId: validation.userId, wdId: validation.wdId, amountCoins: data.amt || 0 });
+      chosen = { id, data, roundedAmount: validation.roundedAmount, userId: validation.userId, wdId: validation.wdId, amountCoins: data.amt || 0 };
+      break; // وقفنا عند أول طلب صالح — باقي القائمة يستنى
     }
 
-    if (!validItems.length) { console.log("📭 No valid withdrawals after checks"); isProcessing = false; return; }
+    if (!chosen) { console.log("📭 No valid withdrawal to pay this cycle"); isProcessing = false; return; }
 
-    const totalTON = validItems.reduce((s, i) => s + i.roundedAmount, 0);
-
-    if (mode === 'batch') {
-      const batchCount = Math.ceil(validItems.length / BATCH_SIZE);
-      console.log(`\n🚀 BATCH | ${validItems.length} items → ${batchCount} batch(es) | ${totalTON.toFixed(4)} TON`);
-      for (let b = 0; b < batchCount; b++) {
-        const batch = validItems.slice(b * BATCH_SIZE, (b + 1) * BATCH_SIZE);
-        console.log(`\n▶️ Batch ${b + 1}/${batchCount} (${batch.length} items)...`);
-        await sendBatchTransfer(batch);
-        if (b < batchCount - 1) { console.log(`⏳ Waiting ${BATCH_BETWEEN_DELAY / 1000}s...`); await new Promise(r => setTimeout(r, BATCH_BETWEEN_DELAY)); }
-      }
-    } else {
-      console.log(`\n🚀 SINGLE | ${validItems.length} items | ${totalTON.toFixed(4)} TON | delay: ${SINGLE_DELAY_MS/1000}s`);
-      for (let i = 0; i < validItems.length; i++) {
-        if (systemPaused) { console.log("⏸ Paused mid-single — stopping"); break; }
-        console.log(`\n▶️ Single ${i + 1}/${validItems.length}: ${validItems[i].id}`);
-        await sendSingleTransfer(validItems[i]);
-        if (i < validItems.length - 1) { await new Promise(r => setTimeout(r, SINGLE_DELAY_MS)); }
-      }
-    }
+    console.log(`\n🚀 Paying single withdrawal: ${chosen.id} | ${chosen.roundedAmount.toFixed(4)} TON`);
+    await sendSingleTransfer(chosen);
 
   } catch (e) { console.log(`❌ processPendingWithdrawals: ${e.message}`); }
   finally { isProcessing = false; console.log("✅ processPendingWithdrawals cycle done"); }
@@ -2612,7 +2596,7 @@ getWallet().then(async () => {
 
 setInterval(async () => {
   if (!systemPaused && WITHDRAWAL_ENABLED) await processPendingWithdrawals();
-}, 3 * 60 * 1000);
+}, 60 * 1000);
 
 db.ref("withdrawQueue").on("child_added", async (snap) => {
   if (systemPaused) return;
@@ -2623,6 +2607,76 @@ db.ref("withdrawQueue").on("child_added", async (snap) => {
     setTimeout(() => processPendingWithdrawals(), 2000);
   }
 });
+
+// ==========================
+// 🔹 Bridge: withdrawals/{userId}/{id}  →  withdrawQueue/{id}
+//    الـ Mini App بيكتب طلبات السحب على مسار "withdrawals/{userId}/{id}"
+//    بشكل مختلف تماماً عن اللي محرك المعالجة بتاعنا بيقرا منه ("withdrawQueue").
+//    الكود ده بيعمل "مرآة" لأي طلب جديد pending على withdrawQueue بنفس الـ id،
+//    عشان يدخل في نفس محرك التحقق والدفع، وبعدين بيرجّع تحديث الحالة
+//    (paid / cancelled / failed / ...) لنفس المسار الأصلي عشان الـ Mini App يعرضها صح.
+// ==========================
+function mapLegacyWithdrawal(userId, id, data) {
+  const amount = Number(data.netAmount ?? data.amount ?? data.requestedAmount ?? 0);
+  return {
+    address: String(data.walletAddress || data.address || '').trim(),
+    ton: amount,
+    userId,
+    wdId: id,
+    ts: data.ts || data.timestamp || Date.now(),
+    status: "pending",
+    srcPath: `withdrawals/${userId}/${id}`,
+  };
+}
+
+function watchLegacyWithdrawals() {
+  db.ref("withdrawals").on("child_added", (userSnap) => {
+    const userId = userSnap.key;
+
+    userSnap.ref.on("child_added", async (wSnap) => {
+      const id   = wSnap.key;
+      const data = wSnap.val();
+      if (!data || data.status !== "pending" || data.mirrored) return;
+
+      try {
+        const qRef = db.ref(`withdrawQueue/${id}`);
+        const existing = (await qRef.once("value")).val();
+        if (existing) { await wSnap.ref.update({ mirrored: true }).catch(() => {}); return; }
+
+        const mapped = mapLegacyWithdrawal(userId, id, data);
+        if (!mapped.address || !mapped.ton) {
+          console.log(`⚠️ Legacy withdrawal ${id} skipped — missing address/amount`);
+          return;
+        }
+
+        await qRef.set(mapped);
+        await wSnap.ref.update({ mirrored: true }).catch(() => {});
+        console.log(`🔗 Mirrored legacy withdrawal ${id} (user ${userId}) → withdrawQueue`);
+        setTimeout(() => processPendingWithdrawals(), 1500);
+      } catch (e) {
+        console.log(`❌ mirror error [${id}]: ${e.message}`);
+      }
+    });
+  });
+}
+
+// مزامنة رجوع حالة الدفع من withdrawQueue للمسار الأصلي withdrawals/{userId}/{id}
+db.ref("withdrawQueue").on("child_changed", async (snap) => {
+  const data = snap.val();
+  if (!data?.srcPath || !data?.status) return;
+  try {
+    await db.ref(data.srcPath).update({
+      status: data.status,
+      txHash: data.txHash || null,
+      lastError: data.lastError || data.error || null,
+      updatedAt: Date.now(),
+    });
+  } catch (e) {
+    console.log(`❌ sync-back error [${snap.key}]: ${e.message}`);
+  }
+});
+
+watchLegacyWithdrawals();
 
 db.ref(".info/connected").on("value", (snap) => { if (snap.val()) console.log("📡 Firebase connected"); });
 
