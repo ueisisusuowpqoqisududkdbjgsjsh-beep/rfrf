@@ -1086,16 +1086,18 @@ async function checkDeposits() {
         `✅ تم إرسال إشعار للمستخدم\n` +
         `🔗 <a href="${txLink}">View Transaction</a>`;
 
-      await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id:                ADMIN_CHAT_ID,
-          text:                   adminMessage,
-          parse_mode:             "HTML",
-          disable_web_page_preview: false,
-        })
-      });
+      for (const adminId of ADMIN_CHAT_IDS) {
+        await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id:                adminId,
+            text:                   adminMessage,
+            parse_mode:             "HTML",
+            disable_web_page_preview: false,
+          })
+        }).catch(() => {});
+      }
       console.log(`📨 Admin notified about deposit from user ${userId}`);
     }
 
