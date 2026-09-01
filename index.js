@@ -1571,6 +1571,28 @@ function startWelcomeBot() {
     const address = wd.address || '—';
     const requestTime = new Date(wd.ts || Date.now()).toLocaleString('en-GB', { timeZone: 'UTC', hour12: false });
 
+    // بيانات البروفايل الأساسية — نفس الحقول اللي بتعرضها لوحة التحكم في "عرض تفاصيل المستخدم"
+    let displayName = userId, username = null, pmtBalance = 0, referralCode = '—', referredBy = '—';
+    let forceSubPassed = false, linkedWallet = '—', joinedAt = null, lastSeen = null, isBanned = false;
+    try {
+      const [userSnap, bannedSnap] = await Promise.all([
+        db.ref(`users/${userId}`).once('value'),
+        db.ref(`bannedUsers/${userId}`).once('value'),
+      ]);
+      const u = userSnap.val() || {};
+      const nameParts = [u.firstName, u.lastName].filter(Boolean).join(' ').trim();
+      displayName     = nameParts || (u.username ? '@' + u.username : userId);
+      username        = u.username || null;
+      pmtBalance      = Number(u.balance || 0);
+      referralCode    = u.referralCode || '—';
+      referredBy      = u.referredBy || '—';
+      forceSubPassed  = !!u.forceSubPassed;
+      linkedWallet    = u.tonWallet || u.wallet || '—';
+      joinedAt        = u.createdAt || null;
+      lastSeen        = u.lastLogin || null;
+      isBanned        = bannedSnap.exists();
+    } catch(e) {}
+
     // إجمالي الإيداعات
     let totalDepositTon = 0;
     try {
@@ -1620,17 +1642,38 @@ function startWelcomeBot() {
       `${'━'.repeat(30)}
 
 ` +
-      `👤 <b>المستخدم:</b> <code>${userId}</code>
+      `👤 <b>المستخدم:</b> ${escapeHtml(displayName)}${username ? ' (@' + escapeHtml(username) + ')' : ''}
+` +
+      `🆔 <b>آيدي تيليجرام:</b> <code>${userId}</code>
 ` +
       `🆔 <b>ID السحب:</b> <code>${wdId}</code>
+` +
+      `🚫 <b>محظور:</b> ${isBanned ? 'نعم ❌' : 'لا ✅'}
 
 ` +
       `${'─'.repeat(30)}
 ` +
       `💰 <b>المبلغ المطلوب:</b> <b>${roundedAmount.toFixed(4)} TON</b>
 ` +
-      `📬 <b>المحفظة:</b>
+      `📬 <b>محفظة السحب:</b>
 <code>${address}</code>
+` +
+      `🔗 <b>المحفظة المرتبطة بالحساب:</b> ${escapeHtml(linkedWallet)}
+
+` +
+      `${'─'.repeat(30)}
+` +
+      `🪙 <b>رصيد PMT:</b> ${formatCompactNumber(pmtBalance) ?? pmtBalance}
+` +
+      `🏷️ <b>كود الإحالة:</b> ${escapeHtml(referralCode)}
+` +
+      `👤 <b>تمت إحالته بواسطة:</b> ${escapeHtml(referredBy)}
+` +
+      `📌 <b>اجتاز الاشتراك الإجباري:</b> ${forceSubPassed ? 'نعم' : 'لا'}
+` +
+      `📅 <b>تاريخ الانضمام:</b> ${joinedAt ? new Date(joinedAt).toLocaleString('en-GB', { timeZone: 'UTC', hour12: false }) : '—'}
+` +
+      `🕐 <b>آخر ظهور:</b> ${lastSeen ? new Date(lastSeen).toLocaleString('en-GB', { timeZone: 'UTC', hour12: false }) : '—'}
 
 ` +
       `${'─'.repeat(30)}
@@ -1652,7 +1695,7 @@ function startWelcomeBot() {
 ` +
       `${'─'.repeat(30)}
 ` +
-      `🕐 <b>الوقت:</b> ${requestTime} UTC
+      `🕐 <b>وقت طلب السحب:</b> ${requestTime} UTC
 ` +
       `${'━'.repeat(30)}`;
 
