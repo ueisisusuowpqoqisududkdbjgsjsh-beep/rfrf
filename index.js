@@ -379,6 +379,40 @@ async function getUserDailyWithdrawalCount(userId) {
 // ==========================
 // 🔹 إشعار الأدمن بطلب موافقة
 // ==========================
+// ==========================
+// 🔹 تنبيه فوري للأدمن بسحب يحتاج موافقة يدوية (يتبعت تلقائيًا أول ما الحالة تتغير)
+// ==========================
+async function sendManualReviewAlert(withdrawId, data, reason) {
+  if (!botInstance) return;
+  const roundedAmount = roundAmount(data.ton ?? data.amt);
+  const userId  = data.userId || 'unknown';
+  const address = data.address || '—';
+  const requestTime = new Date(data.ts || Date.now()).toLocaleString('en-GB', { timeZone: 'UTC', hour12: false });
+
+  const text =
+    `🔍 <b>سحب يحتاج موافقة يدوية</b>\n\n` +
+    `👤 User: <code>${userId}</code>\n` +
+    `🆔 ID: <code>${withdrawId}</code>\n\n` +
+    `💰 المبلغ: <b>${roundedAmount.toFixed(4)} TON</b>\n` +
+    `📬 المحفظة:\n<code>${address}</code>\n\n` +
+    `⚠️ السبب: ${reason}\n` +
+    `🕐 الوقت: ${requestTime} UTC\n\n` +
+    `هل توافق على هذا السحب؟ (أو استخدم /pending_wd لعرض كل التفاصيل)`;
+
+  try {
+    await botInstance.sendMessage(ADMIN_CHAT_ID, text, {
+      parse_mode: 'HTML',
+      reply_markup: {
+        inline_keyboard: [[
+          { text: "✅ موافقة — ادفع الآن", callback_data: `approve_wd:${withdrawId}` },
+          { text: "❌ رفض — إلغاء",        callback_data: `reject_wd:${withdrawId}`  },
+        ]]
+      }
+    });
+    console.log(`📨 Manual review alert sent for ${withdrawId}`);
+  } catch (e) { console.log(`❌ sendManualReviewAlert: ${e.message}`); }
+}
+
 async function sendAdminApprovalRequest(botInstance, withdrawId, data, dailyCount) {
   const roundedAmount = roundAmount(data.ton);
   const userId        = data.userId || 'unknown';
@@ -618,56 +652,21 @@ async function validateWithdrawal(withdrawId, data) {
     return { valid: false, skip: false };
   }
 
-  // فحص الإيداعات — تم إلغاؤه بالكامل: المستخدم بدون إيداع ("مجاني") يُعامل
-  // بنفس قواعد السحب العامة اللي بتنطبق على أي مستخدم تاني (Max/Min/Daily limit)
-  // بدون أي سقف إضافي أو حاجة لموافقة يدوية بسبب عدم وجود إيداع.
-
+  // سياسة: كل سحب لازم الأدمن يوافق عليه يدويًا قبل أي دفع تلقائي — بغض النظر
+  // عن المبلغ. الحدود اليومية/الأقصى/الأدنى بقت كلها مش شرط توجيه هنا؛ القرار
+  // بالكامل للأدمن عن طريق /pending_wd أو أزرار الموافقة/الرفض المرسلة تلقائيًا.
   if (userId && !data.approvedByAdmin) {
-    const dailyCount = await getUserDailyWithdrawalCount(userId);
-    if (dailyCount >= DAILY_LIMIT) {
-      const cooldownMs  = DAILY_COOLDOWN_HOURS * 60 * 60 * 1000;
-      const unlockTime  = (data.ts || Date.now()) + cooldownMs;
-      const unlockStr   = new Date(unlockTime).toLocaleString('en-GB', { timeZone: 'UTC', hour12: false });
-      await db.ref(`withdrawQueue/${withdrawId}`).update({
-        status: "awaiting_approval", updatedAt: Date.now(),
-        holdReason: `تجاوز الحد اليومي (${dailyCount}/${DAILY_LIMIT}) — سيُدفع تلقائياً بعد ${DAILY_COOLDOWN_HOURS}ساعة`,
-        unlockAt:  unlockTime,
-      });
-      console.log(`⏳ Daily limit — ${withdrawId} queued until ${unlockStr} UTC`);
-      return { valid: false, skip: false };
-    }
-  }
-
-  if (roundedAmount > MAX_WITHDRAWAL_AMOUNT && !data.approvedByAdmin) {
-    // سحب يتجاوز الحد الأقصى — يحتاج مراجعة يدوية من الأدمن
     const already = (data.status === 'awaiting_manual');
     if (!already) {
+      const reason = `طلب سحب جديد — بمبلغ ${roundedAmount} TON — يحتاج موافقة يدوية (كل السحوبات محتاجة مراجعة)`;
       await db.ref(`withdrawQueue/${withdrawId}`).update({
         status: 'awaiting_manual',
         updatedAt: Date.now(),
-        holdReason: `يتجاوز الحد الأقصى للدفع التلقائي (${MAX_WITHDRAWAL_AMOUNT} TON) — يحتاج موافقة يدوية`,
+        holdReason: reason,
+        error: null, lastError: null,
       });
-      console.log(`⏸ Manual review required: ${withdrawId} | ${roundedAmount} TON > ${MAX_WITHDRAWAL_AMOUNT} TON`);
-    }
-    return { valid: false, skip: false };
-  }
-  if (roundedAmount < MIN_WITHDRAWAL_AMOUNT) {
-    const alreadyFlagged = data.error && data.error.startsWith('Below min');
-    await db.ref(`withdrawQueue/${withdrawId}`).update({
-      status: "pending",
-      error: `Below min ${MIN_WITHDRAWAL_AMOUNT} TON — waiting`,
-      lastError: `Below min ${MIN_WITHDRAWAL_AMOUNT} TON — waiting`,
-      updatedAt: Date.now(),
-    });
-    console.log(`⚠️ Below minimum — ${withdrawId} | ${roundedAmount} TON < ${MIN_WITHDRAWAL_AMOUNT} TON — staying pending`);
-    if (!alreadyFlagged && botInstance) {
-      await botInstance.sendMessage(ADMIN_CHAT_ID,
-        `⚠️ <b>سحب أقل من الحد الأدنى — عالق في الانتظار</b>\n\n` +
-        `🆔 ID: <code>${withdrawId}</code>\n👤 User: <code>${userId || '?'}</code>\n` +
-        `💰 المبلغ: <b>${roundedAmount} TON</b> (الحد الأدنى: ${MIN_WITHDRAWAL_AMOUNT} TON)\n\n` +
-        `لن يُدفع تلقائيًا أبدًا لأنه أقل من الحد الأدنى — استخدم /pending_wd أو وافق عليه يدويًا أو ألغِه.`,
-        { parse_mode: 'HTML' }
-      ).catch(() => {});
+      console.log(`⏸ Manual review required (كل السحوبات محتاجة مراجعة): ${withdrawId} | ${roundedAmount} TON`);
+      await sendManualReviewAlert(withdrawId, { ...data, ton: roundedAmount }, reason);
     }
     return { valid: false, skip: false };
   }
