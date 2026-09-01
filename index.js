@@ -76,6 +76,10 @@ function roundAmount(amount) {
   } catch { return 0.001; }
 }
 
+function todayKeyCairo() {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+}
+
 function escapeHtml(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -1575,27 +1579,39 @@ function startWelcomeBot() {
       totalDepositTon = Object.values(deps).reduce((s, d) => s + (Number(d.amount || d.tonAdded || 0)), 0);
     } catch(e) {}
 
-    // إجمالي السحوبات المدفوعة
+    // إجمالي السحوبات المدفوعة + عدد السحوبات الناجحة
     let totalPaidTon = 0;
-    try {
-      const wdSnap = await db.ref(`users/${userId}/wdHistory`).once('value');
-      const wds = wdSnap.val() || {};
-      totalPaidTon = Object.values(wds).filter(w => w.status === 'paid').reduce((s, w) => s + (Number(w.sentAmount || 0)), 0);
-    } catch(e) {}
-
-    // الإحالات النشطة
-    let activeReferrals = 0;
-    try {
-      const refSnap = await db.ref(`users/${userId}/referrals`).once('value');
-      if (refSnap.exists()) activeReferrals = Object.keys(refSnap.val() || {}).length;
-    } catch(e) {}
-
-    // عدد السحوبات الناجحة
     let paidCount = 0;
     try {
-      const wdSnap2 = await db.ref(`users/${userId}/wdHistory`).once('value');
-      const wds2 = wdSnap2.val() || {};
-      paidCount = Object.values(wds2).filter(w => w.status === 'paid').length;
+      const wdSnap = await db.ref(`users/${userId}/wdHistory`).once('value');
+      const wds = Object.values(wdSnap.val() || {});
+      const paid = wds.filter(w => w.status === 'paid');
+      totalPaidTon = paid.reduce((s, w) => s + (Number(w.sentAmount || 0)), 0);
+      paidCount = paid.length;
+    } catch(e) {}
+
+    // إجمالي/نشطة الإحالات — نفس المسار والمنطق المستخدم في لوحة التحكم (referrals/{id})
+    let totalReferrals = 0;
+    let activeReferrals = 0;
+    try {
+      const refSnap = await db.ref(`referrals/${userId}`).once('value');
+      const refs = Object.values(refSnap.val() || {});
+      totalReferrals  = refs.length;
+      activeReferrals = refs.filter(r => r && (r.status === 'active' || r.status === 'completed')).length;
+    } catch(e) {}
+
+    // إعلانات المستخدم — نفس الحقول اللي بتستخدمها لوحة التحكم
+    let adsToday = 0;
+    let adsAllTime = 0;
+    try {
+      const userSnap = await db.ref(`users/${userId}`).once('value');
+      const u = userSnap.val() || {};
+      adsAllTime = Number(u.totalAdsWatched || 0);
+      if (u.adWatchDate === todayKeyCairo()) {
+        adsToday = u.adsWatchedByCompany
+          ? Object.values(u.adsWatchedByCompany).reduce((s, c) => s + Number(c || 0), 0)
+          : Number(u.adsWatchedToday || 0);
+      }
     } catch(e) {}
 
     const text =
@@ -1625,7 +1641,13 @@ function startWelcomeBot() {
 ` +
       `✅ <b>عدد السحوبات الناجحة:</b> ${paidCount}
 ` +
-      `👥 <b>الإحالات النشطة:</b> ${activeReferrals}
+      `👥 <b>إجمالي الإحالات:</b> ${totalReferrals}
+` +
+      `🟢 <b>الإحالات النشطة:</b> ${activeReferrals}
+` +
+      `📺 <b>إعلانات اليوم:</b> ${adsToday}
+` +
+      `🎬 <b>إجمالي الإعلانات:</b> ${adsAllTime}
 
 ` +
       `${'─'.repeat(30)}
