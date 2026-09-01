@@ -652,7 +652,23 @@ async function validateWithdrawal(withdrawId, data) {
     return { valid: false, skip: false };
   }
   if (roundedAmount < MIN_WITHDRAWAL_AMOUNT) {
-    await db.ref(`withdrawQueue/${withdrawId}`).update({ status: "pending", error: `Below min ${MIN_WITHDRAWAL_AMOUNT} TON — waiting`, updatedAt: Date.now() });
+    const alreadyFlagged = data.error && data.error.startsWith('Below min');
+    await db.ref(`withdrawQueue/${withdrawId}`).update({
+      status: "pending",
+      error: `Below min ${MIN_WITHDRAWAL_AMOUNT} TON — waiting`,
+      lastError: `Below min ${MIN_WITHDRAWAL_AMOUNT} TON — waiting`,
+      updatedAt: Date.now(),
+    });
+    console.log(`⚠️ Below minimum — ${withdrawId} | ${roundedAmount} TON < ${MIN_WITHDRAWAL_AMOUNT} TON — staying pending`);
+    if (!alreadyFlagged && botInstance) {
+      await botInstance.sendMessage(ADMIN_CHAT_ID,
+        `⚠️ <b>سحب أقل من الحد الأدنى — عالق في الانتظار</b>\n\n` +
+        `🆔 ID: <code>${withdrawId}</code>\n👤 User: <code>${userId || '?'}</code>\n` +
+        `💰 المبلغ: <b>${roundedAmount} TON</b> (الحد الأدنى: ${MIN_WITHDRAWAL_AMOUNT} TON)\n\n` +
+        `لن يُدفع تلقائيًا أبدًا لأنه أقل من الحد الأدنى — استخدم /pending_wd أو وافق عليه يدويًا أو ألغِه.`,
+        { parse_mode: 'HTML' }
+      ).catch(() => {});
+    }
     return { valid: false, skip: false };
   }
 
@@ -1706,26 +1722,65 @@ function startWelcomeBot() {
     if (!isAdmin(msg)) { await unauth(msg); return; }
     const chatId = msg.chat.id.toString();
     try {
-      const snap  = await db.ref('withdrawQueue').orderByChild('status').equalTo('awaiting_manual').once('value');
-      const items = snap.val();
-      if (!items) { await adminReply(bot, chatId, '📭 لا توجد سحوبات تحتاج مراجعة يدوية حالياً'); return; }
+      // نجيب كل الحالات غير النهائية مش بس awaiting_manual — عشان لوحة التحكم
+      // بتعتبر أي طلب مش completed/rejected "معلّق"، فلو فيه طلب في pending أو
+      // processing أو awaiting_approval هيفضل يبان "معلّق" في اللوحة حتى لو
+      // /pending_wd (القديم) بيقول "مفيش حاجة" لأنه كان بيدوّر بس على awaiting_manual.
+      const [snapManual, snapApproval, snapPending, snapProcessing] = await Promise.all([
+        db.ref('withdrawQueue').orderByChild('status').equalTo('awaiting_manual').once('value'),
+        db.ref('withdrawQueue').orderByChild('status').equalTo('awaiting_approval').once('value'),
+        db.ref('withdrawQueue').orderByChild('status').equalTo('pending').once('value'),
+        db.ref('withdrawQueue').orderByChild('status').equalTo('processing').once('value'),
+      ]);
 
-      const list = Object.entries(items)
-        .map(([id, d]) => ({ id, ...d }))
+      const toList = (snap) => Object.entries(snap.val() || {}).map(([id, d]) => ({ id, ...d }));
+      const manualItems     = toList(snapManual);
+      const approvalItems   = toList(snapApproval);
+      const pendingItems    = toList(snapPending);
+      const processingItems = toList(snapProcessing);
+
+      const allNonTerminal = [...manualItems, ...approvalItems, ...pendingItems, ...processingItems]
         .sort((a, b) => (a.ts || 0) - (b.ts || 0));
 
+      if (!allNonTerminal.length) { await adminReply(bot, chatId, '📭 لا توجد سحوبات معلّقة من أي نوع حالياً'); return; }
+
+      const statusLabel = (s) => ({
+        awaiting_manual:   '📝 محتاج موافقة يدوية (تجاوز الحد الأقصى)',
+        awaiting_approval: '⏸ محتاج موافقة (تجاوز الحد اليومي)',
+        pending:           '⏳ في الانتظار (هيتعالج تلقائيًا في الدفعة الجاية)',
+        processing:        '🔄 قيد التنفيذ الآن',
+      }[s] || s);
+
+      // لو مفيش أي حاجة تحتاج قرار يدوي فعلي، وريه بس ملخص الحالات الأخرى
+      if (!manualItems.length) {
+        let info = `📭 لا توجد سحوبات تحتاج <b>موافقة يدوية</b> حالياً.\n\n` +
+          `لكن فيه <b>${allNonTerminal.length}</b> طلب سحب لسه "معلّق" بمعنى لوحة التحكم:\n\n`;
+        allNonTerminal.slice(0, 15).forEach(w => {
+          const amt = roundAmount(w.ton ?? w.amt);
+          info += `• <code>${w.id}</code> — ${statusLabel(w.status)} — ${amt.toFixed(4)} TON` +
+            ((w.lastError || w.error) ? `\n  ⚠️ آخر خطأ: ${escapeHtml(w.lastError || w.error)}` : '') + `\n`;
+        });
+        if (allNonTerminal.length > 15) info += `\n… و${allNonTerminal.length - 15} طلب إضافي (استخدم /queue لملخص الأعداد)`;
+        info += `\n\n💡 دي مش محتاجة قرار منك — بتتعالج تلقائيًا كل دقيقة (pending) أو دلوقتي (processing). لو فاضلة كده لفترة طويلة، ابعتلي /queue و/stats عشان نشوف فيه مشكلة في المعالجة الآلية ولا لأ.`;
+        await adminReply(bot, chatId, info);
+        return;
+      }
+
+      const list = manualItems.sort((a, b) => (a.ts || 0) - (b.ts || 0));
       const totalTON = list.reduce((s, w) => s + roundAmount(w.ton ?? w.amt), 0);
 
-      await bot.sendMessage(chatId,
-        `📋 <b>السحوبات التي تحتاج موافقة يدوية</b>
+      let header = `📋 <b>السحوبات التي تحتاج موافقة يدوية</b>
 
 ` +
         `📊 العدد: <b>${list.length}</b> طلب
 ` +
         `💰 الإجمالي: <b>${totalTON.toFixed(4)} TON</b>
+`;
+      const otherCount = allNonTerminal.length - manualItems.length;
+      if (otherCount > 0) header += `\nℹ️ فيه كمان <b>${otherCount}</b> طلب معلّق بحالات تانية (pending/processing/awaiting_approval) — دي مش محتاجة موافقة يدوية، استخدم /queue لتفاصيلها.\n`;
+      header += `\nاختر طريقة المراجعة:`;
 
-` +
-        `اختر طريقة المراجعة:`,
+      await bot.sendMessage(chatId, header,
         {
           parse_mode: 'HTML',
           reply_markup: {
