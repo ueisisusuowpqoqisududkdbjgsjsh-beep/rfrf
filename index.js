@@ -76,6 +76,10 @@ function roundAmount(amount) {
   } catch { return 0.001; }
 }
 
+function todayKeyCairo() {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+}
+
 function escapeHtml(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -375,6 +379,40 @@ async function getUserDailyWithdrawalCount(userId) {
 // ==========================
 // 🔹 إشعار الأدمن بطلب موافقة
 // ==========================
+// ==========================
+// 🔹 تنبيه فوري للأدمن بسحب يحتاج موافقة يدوية (يتبعت تلقائيًا أول ما الحالة تتغير)
+// ==========================
+async function sendManualReviewAlert(withdrawId, data, reason) {
+  if (!botInstance) return;
+  const roundedAmount = roundAmount(data.ton ?? data.amt);
+  const userId  = data.userId || 'unknown';
+  const address = data.address || '—';
+  const requestTime = new Date(data.ts || Date.now()).toLocaleString('en-GB', { timeZone: 'UTC', hour12: false });
+
+  const text =
+    `🔍 <b>سحب يحتاج موافقة يدوية</b>\n\n` +
+    `👤 User: <code>${userId}</code>\n` +
+    `🆔 ID: <code>${withdrawId}</code>\n\n` +
+    `💰 المبلغ: <b>${roundedAmount.toFixed(4)} TON</b>\n` +
+    `📬 المحفظة:\n<code>${address}</code>\n\n` +
+    `⚠️ السبب: ${reason}\n` +
+    `🕐 الوقت: ${requestTime} UTC\n\n` +
+    `هل توافق على هذا السحب؟ (أو استخدم /pending_wd لعرض كل التفاصيل)`;
+
+  try {
+    await botInstance.sendMessage(ADMIN_CHAT_ID, text, {
+      parse_mode: 'HTML',
+      reply_markup: {
+        inline_keyboard: [[
+          { text: "✅ موافقة — ادفع الآن", callback_data: `approve_wd:${withdrawId}` },
+          { text: "❌ رفض — إلغاء",        callback_data: `reject_wd:${withdrawId}`  },
+        ]]
+      }
+    });
+    console.log(`📨 Manual review alert sent for ${withdrawId}`);
+  } catch (e) { console.log(`❌ sendManualReviewAlert: ${e.message}`); }
+}
+
 async function sendAdminApprovalRequest(botInstance, withdrawId, data, dailyCount) {
   const roundedAmount = roundAmount(data.ton);
   const userId        = data.userId || 'unknown';
@@ -614,41 +652,22 @@ async function validateWithdrawal(withdrawId, data) {
     return { valid: false, skip: false };
   }
 
-  // فحص الإيداعات — تم إلغاؤه بالكامل: المستخدم بدون إيداع ("مجاني") يُعامل
-  // بنفس قواعد السحب العامة اللي بتنطبق على أي مستخدم تاني (Max/Min/Daily limit)
-  // بدون أي سقف إضافي أو حاجة لموافقة يدوية بسبب عدم وجود إيداع.
-
+  // سياسة: كل سحب لازم الأدمن يوافق عليه يدويًا قبل أي دفع تلقائي — بغض النظر
+  // عن المبلغ. الحدود اليومية/الأقصى/الأدنى بقت كلها مش شرط توجيه هنا؛ القرار
+  // بالكامل للأدمن عن طريق /pending_wd أو أزرار الموافقة/الرفض المرسلة تلقائيًا.
   if (userId && !data.approvedByAdmin) {
-    const dailyCount = await getUserDailyWithdrawalCount(userId);
-    if (dailyCount >= DAILY_LIMIT) {
-      const cooldownMs  = DAILY_COOLDOWN_HOURS * 60 * 60 * 1000;
-      const unlockTime  = (data.ts || Date.now()) + cooldownMs;
-      const unlockStr   = new Date(unlockTime).toLocaleString('en-GB', { timeZone: 'UTC', hour12: false });
-      await db.ref(`withdrawQueue/${withdrawId}`).update({
-        status: "awaiting_approval", updatedAt: Date.now(),
-        holdReason: `تجاوز الحد اليومي (${dailyCount}/${DAILY_LIMIT}) — سيُدفع تلقائياً بعد ${DAILY_COOLDOWN_HOURS}ساعة`,
-        unlockAt:  unlockTime,
-      });
-      console.log(`⏳ Daily limit — ${withdrawId} queued until ${unlockStr} UTC`);
-      return { valid: false, skip: false };
-    }
-  }
-
-  if (roundedAmount > MAX_WITHDRAWAL_AMOUNT && !data.approvedByAdmin) {
-    // سحب يتجاوز الحد الأقصى — يحتاج مراجعة يدوية من الأدمن
     const already = (data.status === 'awaiting_manual');
     if (!already) {
+      const reason = `طلب سحب جديد — بمبلغ ${roundedAmount} TON — يحتاج موافقة يدوية (كل السحوبات محتاجة مراجعة)`;
       await db.ref(`withdrawQueue/${withdrawId}`).update({
         status: 'awaiting_manual',
         updatedAt: Date.now(),
-        holdReason: `يتجاوز الحد الأقصى للدفع التلقائي (${MAX_WITHDRAWAL_AMOUNT} TON) — يحتاج موافقة يدوية`,
+        holdReason: reason,
+        error: null, lastError: null,
       });
-      console.log(`⏸ Manual review required: ${withdrawId} | ${roundedAmount} TON > ${MAX_WITHDRAWAL_AMOUNT} TON`);
+      console.log(`⏸ Manual review required (كل السحوبات محتاجة مراجعة): ${withdrawId} | ${roundedAmount} TON`);
+      await sendManualReviewAlert(withdrawId, { ...data, ton: roundedAmount }, reason);
     }
-    return { valid: false, skip: false };
-  }
-  if (roundedAmount < MIN_WITHDRAWAL_AMOUNT) {
-    await db.ref(`withdrawQueue/${withdrawId}`).update({ status: "pending", error: `Below min ${MIN_WITHDRAWAL_AMOUNT} TON — waiting`, updatedAt: Date.now() });
     return { valid: false, skip: false };
   }
 
@@ -1567,6 +1586,28 @@ function startWelcomeBot() {
     const address = wd.address || '—';
     const requestTime = new Date(wd.ts || Date.now()).toLocaleString('en-GB', { timeZone: 'UTC', hour12: false });
 
+    // بيانات البروفايل الأساسية — نفس الحقول اللي بتعرضها لوحة التحكم في "عرض تفاصيل المستخدم"
+    let displayName = userId, username = null, pmtBalance = 0, referralCode = '—', referredBy = '—';
+    let forceSubPassed = false, linkedWallet = '—', joinedAt = null, lastSeen = null, isBanned = false;
+    try {
+      const [userSnap, bannedSnap] = await Promise.all([
+        db.ref(`users/${userId}`).once('value'),
+        db.ref(`bannedUsers/${userId}`).once('value'),
+      ]);
+      const u = userSnap.val() || {};
+      const nameParts = [u.firstName, u.lastName].filter(Boolean).join(' ').trim();
+      displayName     = nameParts || (u.username ? '@' + u.username : userId);
+      username        = u.username || null;
+      pmtBalance      = Number(u.balance || 0);
+      referralCode    = u.referralCode || '—';
+      referredBy      = u.referredBy || '—';
+      forceSubPassed  = !!u.forceSubPassed;
+      linkedWallet    = u.tonWallet || u.wallet || '—';
+      joinedAt        = u.createdAt || null;
+      lastSeen        = u.lastLogin || null;
+      isBanned        = bannedSnap.exists();
+    } catch(e) {}
+
     // إجمالي الإيداعات
     let totalDepositTon = 0;
     try {
@@ -1575,27 +1616,39 @@ function startWelcomeBot() {
       totalDepositTon = Object.values(deps).reduce((s, d) => s + (Number(d.amount || d.tonAdded || 0)), 0);
     } catch(e) {}
 
-    // إجمالي السحوبات المدفوعة
+    // إجمالي السحوبات المدفوعة + عدد السحوبات الناجحة
     let totalPaidTon = 0;
-    try {
-      const wdSnap = await db.ref(`users/${userId}/wdHistory`).once('value');
-      const wds = wdSnap.val() || {};
-      totalPaidTon = Object.values(wds).filter(w => w.status === 'paid').reduce((s, w) => s + (Number(w.sentAmount || 0)), 0);
-    } catch(e) {}
-
-    // الإحالات النشطة
-    let activeReferrals = 0;
-    try {
-      const refSnap = await db.ref(`users/${userId}/referrals`).once('value');
-      if (refSnap.exists()) activeReferrals = Object.keys(refSnap.val() || {}).length;
-    } catch(e) {}
-
-    // عدد السحوبات الناجحة
     let paidCount = 0;
     try {
-      const wdSnap2 = await db.ref(`users/${userId}/wdHistory`).once('value');
-      const wds2 = wdSnap2.val() || {};
-      paidCount = Object.values(wds2).filter(w => w.status === 'paid').length;
+      const wdSnap = await db.ref(`users/${userId}/wdHistory`).once('value');
+      const wds = Object.values(wdSnap.val() || {});
+      const paid = wds.filter(w => w.status === 'paid');
+      totalPaidTon = paid.reduce((s, w) => s + (Number(w.sentAmount || 0)), 0);
+      paidCount = paid.length;
+    } catch(e) {}
+
+    // إجمالي/نشطة الإحالات — نفس المسار والمنطق المستخدم في لوحة التحكم (referrals/{id})
+    let totalReferrals = 0;
+    let activeReferrals = 0;
+    try {
+      const refSnap = await db.ref(`referrals/${userId}`).once('value');
+      const refs = Object.values(refSnap.val() || {});
+      totalReferrals  = refs.length;
+      activeReferrals = refs.filter(r => r && (r.status === 'active' || r.status === 'completed')).length;
+    } catch(e) {}
+
+    // إعلانات المستخدم — نفس الحقول اللي بتستخدمها لوحة التحكم
+    let adsToday = 0;
+    let adsAllTime = 0;
+    try {
+      const userSnap = await db.ref(`users/${userId}`).once('value');
+      const u = userSnap.val() || {};
+      adsAllTime = Number(u.totalAdsWatched || 0);
+      if (u.adWatchDate === todayKeyCairo()) {
+        adsToday = u.adsWatchedByCompany
+          ? Object.values(u.adsWatchedByCompany).reduce((s, c) => s + Number(c || 0), 0)
+          : Number(u.adsWatchedToday || 0);
+      }
     } catch(e) {}
 
     const text =
@@ -1604,17 +1657,38 @@ function startWelcomeBot() {
       `${'━'.repeat(30)}
 
 ` +
-      `👤 <b>المستخدم:</b> <code>${userId}</code>
+      `👤 <b>المستخدم:</b> ${escapeHtml(displayName)}${username ? ' (@' + escapeHtml(username) + ')' : ''}
+` +
+      `🆔 <b>آيدي تيليجرام:</b> <code>${userId}</code>
 ` +
       `🆔 <b>ID السحب:</b> <code>${wdId}</code>
+` +
+      `🚫 <b>محظور:</b> ${isBanned ? 'نعم ❌' : 'لا ✅'}
 
 ` +
       `${'─'.repeat(30)}
 ` +
       `💰 <b>المبلغ المطلوب:</b> <b>${roundedAmount.toFixed(4)} TON</b>
 ` +
-      `📬 <b>المحفظة:</b>
+      `📬 <b>محفظة السحب:</b>
 <code>${address}</code>
+` +
+      `🔗 <b>المحفظة المرتبطة بالحساب:</b> ${escapeHtml(linkedWallet)}
+
+` +
+      `${'─'.repeat(30)}
+` +
+      `🪙 <b>رصيد PMT:</b> ${formatCompactNumber(pmtBalance) ?? pmtBalance}
+` +
+      `🏷️ <b>كود الإحالة:</b> ${escapeHtml(referralCode)}
+` +
+      `👤 <b>تمت إحالته بواسطة:</b> ${escapeHtml(referredBy)}
+` +
+      `📌 <b>اجتاز الاشتراك الإجباري:</b> ${forceSubPassed ? 'نعم' : 'لا'}
+` +
+      `📅 <b>تاريخ الانضمام:</b> ${joinedAt ? new Date(joinedAt).toLocaleString('en-GB', { timeZone: 'UTC', hour12: false }) : '—'}
+` +
+      `🕐 <b>آخر ظهور:</b> ${lastSeen ? new Date(lastSeen).toLocaleString('en-GB', { timeZone: 'UTC', hour12: false }) : '—'}
 
 ` +
       `${'─'.repeat(30)}
@@ -1625,12 +1699,18 @@ function startWelcomeBot() {
 ` +
       `✅ <b>عدد السحوبات الناجحة:</b> ${paidCount}
 ` +
-      `👥 <b>الإحالات النشطة:</b> ${activeReferrals}
+      `👥 <b>إجمالي الإحالات:</b> ${totalReferrals}
+` +
+      `🟢 <b>الإحالات النشطة:</b> ${activeReferrals}
+` +
+      `📺 <b>إعلانات اليوم:</b> ${adsToday}
+` +
+      `🎬 <b>إجمالي الإعلانات:</b> ${adsAllTime}
 
 ` +
       `${'─'.repeat(30)}
 ` +
-      `🕐 <b>الوقت:</b> ${requestTime} UTC
+      `🕐 <b>وقت طلب السحب:</b> ${requestTime} UTC
 ` +
       `${'━'.repeat(30)}`;
 
@@ -1641,26 +1721,65 @@ function startWelcomeBot() {
     if (!isAdmin(msg)) { await unauth(msg); return; }
     const chatId = msg.chat.id.toString();
     try {
-      const snap  = await db.ref('withdrawQueue').orderByChild('status').equalTo('awaiting_manual').once('value');
-      const items = snap.val();
-      if (!items) { await adminReply(bot, chatId, '📭 لا توجد سحوبات تحتاج مراجعة يدوية حالياً'); return; }
+      // نجيب كل الحالات غير النهائية مش بس awaiting_manual — عشان لوحة التحكم
+      // بتعتبر أي طلب مش completed/rejected "معلّق"، فلو فيه طلب في pending أو
+      // processing أو awaiting_approval هيفضل يبان "معلّق" في اللوحة حتى لو
+      // /pending_wd (القديم) بيقول "مفيش حاجة" لأنه كان بيدوّر بس على awaiting_manual.
+      const [snapManual, snapApproval, snapPending, snapProcessing] = await Promise.all([
+        db.ref('withdrawQueue').orderByChild('status').equalTo('awaiting_manual').once('value'),
+        db.ref('withdrawQueue').orderByChild('status').equalTo('awaiting_approval').once('value'),
+        db.ref('withdrawQueue').orderByChild('status').equalTo('pending').once('value'),
+        db.ref('withdrawQueue').orderByChild('status').equalTo('processing').once('value'),
+      ]);
 
-      const list = Object.entries(items)
-        .map(([id, d]) => ({ id, ...d }))
+      const toList = (snap) => Object.entries(snap.val() || {}).map(([id, d]) => ({ id, ...d }));
+      const manualItems     = toList(snapManual);
+      const approvalItems   = toList(snapApproval);
+      const pendingItems    = toList(snapPending);
+      const processingItems = toList(snapProcessing);
+
+      const allNonTerminal = [...manualItems, ...approvalItems, ...pendingItems, ...processingItems]
         .sort((a, b) => (a.ts || 0) - (b.ts || 0));
 
+      if (!allNonTerminal.length) { await adminReply(bot, chatId, '📭 لا توجد سحوبات معلّقة من أي نوع حالياً'); return; }
+
+      const statusLabel = (s) => ({
+        awaiting_manual:   '📝 محتاج موافقة يدوية (تجاوز الحد الأقصى)',
+        awaiting_approval: '⏸ محتاج موافقة (تجاوز الحد اليومي)',
+        pending:           '⏳ في الانتظار (هيتعالج تلقائيًا في الدفعة الجاية)',
+        processing:        '🔄 قيد التنفيذ الآن',
+      }[s] || s);
+
+      // لو مفيش أي حاجة تحتاج قرار يدوي فعلي، وريه بس ملخص الحالات الأخرى
+      if (!manualItems.length) {
+        let info = `📭 لا توجد سحوبات تحتاج <b>موافقة يدوية</b> حالياً.\n\n` +
+          `لكن فيه <b>${allNonTerminal.length}</b> طلب سحب لسه "معلّق" بمعنى لوحة التحكم:\n\n`;
+        allNonTerminal.slice(0, 15).forEach(w => {
+          const amt = roundAmount(w.ton ?? w.amt);
+          info += `• <code>${w.id}</code> — ${statusLabel(w.status)} — ${amt.toFixed(4)} TON` +
+            ((w.lastError || w.error) ? `\n  ⚠️ آخر خطأ: ${escapeHtml(w.lastError || w.error)}` : '') + `\n`;
+        });
+        if (allNonTerminal.length > 15) info += `\n… و${allNonTerminal.length - 15} طلب إضافي (استخدم /queue لملخص الأعداد)`;
+        info += `\n\n💡 دي مش محتاجة قرار منك — بتتعالج تلقائيًا كل دقيقة (pending) أو دلوقتي (processing). لو فاضلة كده لفترة طويلة، ابعتلي /queue و/stats عشان نشوف فيه مشكلة في المعالجة الآلية ولا لأ.`;
+        await adminReply(bot, chatId, info);
+        return;
+      }
+
+      const list = manualItems.sort((a, b) => (a.ts || 0) - (b.ts || 0));
       const totalTON = list.reduce((s, w) => s + roundAmount(w.ton ?? w.amt), 0);
 
-      await bot.sendMessage(chatId,
-        `📋 <b>السحوبات التي تحتاج موافقة يدوية</b>
+      let header = `📋 <b>السحوبات التي تحتاج موافقة يدوية</b>
 
 ` +
         `📊 العدد: <b>${list.length}</b> طلب
 ` +
         `💰 الإجمالي: <b>${totalTON.toFixed(4)} TON</b>
+`;
+      const otherCount = allNonTerminal.length - manualItems.length;
+      if (otherCount > 0) header += `\nℹ️ فيه كمان <b>${otherCount}</b> طلب معلّق بحالات تانية (pending/processing/awaiting_approval) — دي مش محتاجة موافقة يدوية، استخدم /queue لتفاصيلها.\n`;
+      header += `\nاختر طريقة المراجعة:`;
 
-` +
-        `اختر طريقة المراجعة:`,
+      await bot.sendMessage(chatId, header,
         {
           parse_mode: 'HTML',
           reply_markup: {
