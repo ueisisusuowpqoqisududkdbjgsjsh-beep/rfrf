@@ -1200,6 +1200,12 @@ function startWelcomeBot() {
             `/broadcast_status — Broadcast status\n` +
             `/broadcast_debug — Check users path\n` +
             `/cancel — Cancel a message-sending session\n\n` +
+            `📡 <b>Channel Broadcast</b>\n` +
+            `/addchannel [id/@user] [label] — Add a channel\n` +
+            `/removechannel [id/@user] — Remove a channel\n` +
+            `/channels — List registered channels\n` +
+            `/sendchannel [id/@user] — Send a message to one channel\n` +
+            `/broadcast_channels — Send a message to all channels\n\n` +
             `🕵️ <b>Fraud Detection</b>\n` +
             `/check_suspicious — Detect shared wallets (+3 users)\n\n` +
             `📊 <b>Referral Reports</b>\n` +
@@ -2137,11 +2143,23 @@ function startWelcomeBot() {
         return `${h}h ${m % 60}m`;
   }
 
-  async function startMsgSession(bot, chatId, targetUserId, isBroadcast = false) {
-    msgSessions[chatId] = { step: 'text', targetUserId, text: null, photo: null, buttons: [], isBroadcast };
-    const header = isBroadcast
-            ? `📢 <b>Send message to all users</b>`
-            : `📩 <b>Send message to user</b> <code>${targetUserId}</code>`;
+  function sanitizeChannelKey(id) {
+    return String(id).replace(/[.$#[\]/]/g, '_');
+  }
+
+  async function getChannelsList() {
+    const snap = await db.ref('broadcastChannels').once('value');
+    return snap.exists() ? snap.val() : {};
+  }
+
+  // mode: 'user' | 'channel' | 'broadcast_users' | 'broadcast_channels'
+  async function startMsgSession(bot, chatId, target, mode = 'user') {
+    msgSessions[chatId] = { step: 'text', target, mode, text: null, photo: null, buttons: [] };
+    let header;
+        if (mode === 'broadcast_users')        header = `📢 <b>Send message to all users</b>`;
+        else if (mode === 'broadcast_channels') header = `📢 <b>Send message to all channels</b>`;
+        else if (mode === 'channel')            header = `📡 <b>Send message to channel</b> <code>${target}</code>`;
+        else                                    header = `📩 <b>Send message to user</b> <code>${target}</code>`;
     await adminReply(bot, chatId,
       `${header}\n\n` +
             `<b>Step 1 — Write the message text:</b>\n` +
@@ -2157,12 +2175,98 @@ function startWelcomeBot() {
             await adminReply(bot, msg.chat.id, `❌ Usage: /sendmsg [userId]\nExample: /sendmsg 6970148965`);
       return;
     }
-    await startMsgSession(bot, msg.chat.id, userId, false);
+    await startMsgSession(bot, msg.chat.id, userId, 'user');
   });
 
-  bot.onText(/\/broadcast/, async (msg) => {
+  bot.onText(/^\/broadcast(?:@\w+)?$/, async (msg) => {
     if (!isAdmin(msg)) { await unauth(msg); return; }
-    await startMsgSession(bot, msg.chat.id, null, true);
+    await startMsgSession(bot, msg.chat.id, null, 'broadcast_users');
+  });
+
+  // ─── Channel broadcast management ──────────────────────
+  bot.onText(/^\/addchannel(?:\s+(\S+))?(?:\s+([\s\S]+))?$/, async (msg, match) => {
+    if (!isAdmin(msg)) { await unauth(msg); return; }
+    const channelId = match && match[1] ? match[1].trim() : null;
+    const label     = match && match[2] ? match[2].trim() : null;
+    if (!channelId) {
+            await adminReply(bot, msg.chat.id, `❌ Usage: /addchannel [channelId or @username] [optional label]\nExample: /addchannel @MyChannel My Channel`);
+      return;
+    }
+    try {
+      let title = label;
+      try {
+        const chat = await bot.getChat(channelId);
+        if (!title) title = chat.title || chat.username || channelId;
+      } catch (e) {
+                await adminReply(bot, msg.chat.id, `⚠️ Couldn't verify the channel (make sure the bot is an admin in it): ${e.message}\nSaving with the provided ID anyway...`);
+        if (!title) title = channelId;
+      }
+      const key = sanitizeChannelKey(channelId);
+      await db.ref(`broadcastChannels/${key}`).set({ id: channelId, title, addedAt: Date.now(), addedBy: String(msg.chat.id) });
+            await adminReply(bot, msg.chat.id, `✅ <b>Channel added</b>\n📡 <code>${escapeHtml(channelId)}</code>\n🏷 ${escapeHtml(title)}`);
+    } catch (e) {
+            await adminReply(bot, msg.chat.id, `❌ Error: ${e.message}`);
+    }
+  });
+
+  bot.onText(/^\/removechannel(?:\s+(\S+))?$/, async (msg, match) => {
+    if (!isAdmin(msg)) { await unauth(msg); return; }
+    const channelId = match && match[1] ? match[1].trim() : null;
+    if (!channelId) {
+            await adminReply(bot, msg.chat.id, `❌ Usage: /removechannel [channelId or @username]`);
+      return;
+    }
+    try {
+      const key  = sanitizeChannelKey(channelId);
+      const snap = await db.ref(`broadcastChannels/${key}`).once('value');
+      if (!snap.exists()) {
+                await adminReply(bot, msg.chat.id, `❌ Channel not found in the list: <code>${escapeHtml(channelId)}</code>`);
+        return;
+      }
+      await db.ref(`broadcastChannels/${key}`).remove();
+            await adminReply(bot, msg.chat.id, `✅ <b>Channel removed</b>\n📡 <code>${escapeHtml(channelId)}</code>`);
+    } catch (e) {
+            await adminReply(bot, msg.chat.id, `❌ Error: ${e.message}`);
+    }
+  });
+
+  bot.onText(/^\/channels$/, async (msg) => {
+    if (!isAdmin(msg)) { await unauth(msg); return; }
+    try {
+      const channels = await getChannelsList();
+      const entries  = Object.values(channels);
+      if (!entries.length) {
+                await adminReply(bot, msg.chat.id, `📭 No channels added yet.\nUse /addchannel [channelId or @username] to add one.`);
+        return;
+      }
+            let text = `📡 <b>Registered Channels (${entries.length})</b>\n${'━'.repeat(28)}\n\n`;
+      entries.forEach((c, i) => {
+        text += `${i + 1}. 🏷 ${escapeHtml(c.title || '—')}\n   🆔 <code>${escapeHtml(c.id)}</code>\n\n`;
+      });
+      await adminReply(bot, msg.chat.id, text);
+    } catch (e) {
+            await adminReply(bot, msg.chat.id, `❌ Error: ${e.message}`);
+    }
+  });
+
+  bot.onText(/^\/sendchannel(?:\s+(\S+))?$/, async (msg, match) => {
+    if (!isAdmin(msg)) { await unauth(msg); return; }
+    const channelId = match && match[1] ? match[1].trim() : null;
+    if (!channelId) {
+            await adminReply(bot, msg.chat.id, `❌ Usage: /sendchannel [channelId or @username]\nExample: /sendchannel @MyChannel`);
+      return;
+    }
+    await startMsgSession(bot, msg.chat.id, channelId, 'channel');
+  });
+
+  bot.onText(/^\/broadcast_channels$/, async (msg) => {
+    if (!isAdmin(msg)) { await unauth(msg); return; }
+    const channels = await getChannelsList();
+    if (!Object.keys(channels).length) {
+            await adminReply(bot, msg.chat.id, `📭 No channels added yet.\nUse /addchannel [channelId or @username] to add one first.`);
+      return;
+    }
+    await startMsgSession(bot, msg.chat.id, null, 'broadcast_channels');
   });
 
   bot.onText(/\/cancel/, async (msg) => {
@@ -2180,6 +2284,7 @@ function startWelcomeBot() {
       return;
     }
     const s        = broadcastState;
+        const label    = s.label === 'channels' ? '📡 Channels' : '👥 Total';
     const elapsed  = Math.floor((Date.now() - s.startedAt) / 1000);
     const done     = s.current;
     const remaining = s.total - done;
@@ -2191,7 +2296,7 @@ function startWelcomeBot() {
       await adminReply(bot, msg.chat.id,
                 `✅ <b>Broadcast complete</b>\n\n` +
         `${bar} ${pct}%\n\n` +
-                `👥 Total: <b>${s.total}</b>\n` +
+                `${label}: <b>${s.total}</b>\n` +
                 `✅ Delivered: <b>${s.sent}</b>\n` +
                 `❌ Failed: <b>${s.failed}</b>\n` +
                 `⏱ Duration: <b>${duration}s</b>`
@@ -2203,7 +2308,7 @@ function startWelcomeBot() {
       await adminReply(bot, msg.chat.id,
                 `📡 <b>Broadcast in progress</b>\n\n` +
         `${bar} ${pct}%\n\n` +
-                `👥 Total: <b>${s.total}</b>\n` +
+                `${label}: <b>${s.total}</b>\n` +
                 `📤 Delivered so far: <b>${done}</b>\n` +
                 `✅ Succeeded: <b>${s.sent}</b>\n` +
                 `❌ Failed: <b>${s.failed}</b>\n` +
@@ -2293,9 +2398,11 @@ function startWelcomeBot() {
       }
       session.step = 'preview';
 
-      const targetLabel = session.isBroadcast
-                ? `📢 <b>To all users</b>`
-        : `👤 <b>${session.targetUserId}</b>`;
+      let targetLabel;
+            if (session.mode === 'broadcast_users')        targetLabel = `📢 <b>To all users</b>`;
+            else if (session.mode === 'broadcast_channels') targetLabel = `📢 <b>To all channels</b>`;
+            else if (session.mode === 'channel')            targetLabel = `📡 <b>Channel</b> <code>${escapeHtml(session.target)}</code>`;
+            else                                             targetLabel = `👤 <b>${escapeHtml(session.target)}</b>`;
 
       await adminReply(bot, msg.chat.id,
                 `🔍 <b>Message Preview</b>\n` +
@@ -2342,10 +2449,10 @@ function startWelcomeBot() {
             await bot.answerCallbackQuery(query.id, { text: '📤 Sending...' });
       await bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: query.message.message_id }).catch(() => {});
 
-      const { text: msgText, photo, buttons, isBroadcast, targetUserId } = session;
+      const { text: msgText, photo, buttons, mode, target } = session;
       const replyMarkup = buttons.length > 0 ? { inline_keyboard: buttons } : undefined;
 
-      async function sendToUser(uid) {
+      async function sendToTarget(uid) {
         try {
           if (photo) {
             await bot.sendPhoto(uid, photo, { caption: msgText, parse_mode: 'HTML', ...(replyMarkup ? { reply_markup: replyMarkup } : {}) });
@@ -2356,18 +2463,65 @@ function startWelcomeBot() {
         } catch (e) { return false; }
       }
 
-      if (!isBroadcast) {
-        const ok = await sendToUser(targetUserId);
-        await adminReply(bot, chatId,
-          ok
-                        ? `✅ <b>Message sent successfully</b> to user <code>${targetUserId}</code>`
-                        : `❌ <b>Sending failed</b> for user <code>${targetUserId}</code> — check the chat ID`
-        );
-      } else {
-        await adminReply(bot, chatId,
-                    '📢 <b>Sending message to all users...</b>\n' +
+      async function runBroadcast(ids, label) {
+                await adminReply(bot, chatId,
+                    `📢 <b>Sending message to all ${label}...</b>\n` +
                     '💡 Use /broadcast_status to track progress at any time'
         );
+        try {
+          let sent = 0, failed = 0;
+                    broadcastState = { total: ids.length, sent: 0, failed: 0, current: 0, startedAt: Date.now(), done: false, doneAt: null, label };
+
+          for (let i = 0; i < ids.length; i++) {
+                        const ok = await sendToTarget(ids[i]);
+            if (ok) sent++; else failed++;
+            broadcastState.current = i + 1;
+            broadcastState.sent    = sent;
+            broadcastState.failed  = failed;
+                        if ((i + 1) % 100 === 0 || i === ids.length - 1) {
+                            const pct = (((i + 1) / ids.length) * 100).toFixed(1);
+                            const bar = buildProgressBar(i + 1, ids.length, 15);
+              await adminReply(bot, chatId,
+                `📊 ${bar} ${pct}%\n` +
+                                `📤 <b>${i + 1}</b>/${ids.length} — ✅ ${sent} | ❌ ${failed}`
+              );
+            }
+            await new Promise(r => setTimeout(r, 50));
+          }
+
+          broadcastState.done   = true;
+          broadcastState.doneAt = Date.now();
+          const duration = Math.floor((broadcastState.doneAt - broadcastState.startedAt) / 1000);
+
+          await adminReply(bot, chatId,
+                        `🎉 <b>Broadcast finished</b>\n\n` +
+                        `${buildProgressBar(ids.length, ids.length, 15)} 100%\n\n` +
+                        `👥 Total: <b>${ids.length}</b>\n` +
+                        `✅ Delivered: <b>${sent}</b>\n` +
+                        `❌ Failed: <b>${failed}</b>\n` +
+                        `⏱ Duration: <b>${formatEta(duration)}</b>`
+          );
+        } catch (e) {
+          if (broadcastState) { broadcastState.done = true; broadcastState.doneAt = Date.now(); }
+                    await adminReply(bot, chatId, `❌ Broadcast error: ${e.message}`);
+        }
+      }
+
+      if (mode === 'user') {
+                const ok = await sendToTarget(target);
+        await adminReply(bot, chatId,
+          ok
+                        ? `✅ <b>Message sent successfully</b> to user <code>${escapeHtml(target)}</code>`
+                        : `❌ <b>Sending failed</b> for user <code>${escapeHtml(target)}</code> — check the chat ID`
+        );
+            } else if (mode === 'channel') {
+                const ok = await sendToTarget(target);
+                await adminReply(bot, chatId,
+                    ok
+                        ? `✅ <b>Message sent successfully</b> to channel <code>${escapeHtml(target)}</code>`
+                        : `❌ <b>Sending failed</b> for channel <code>${escapeHtml(target)}</code> — check the ID and that the bot is an admin there`
+                );
+            } else if (mode === 'broadcast_users') {
         try {
           let userIds = [];
           try {
@@ -2382,43 +2536,22 @@ function startWelcomeBot() {
             const users     = usersSnap.val() || {};
             userIds         = Object.keys(users);
           }
-          let sent = 0, failed = 0;
-
-          broadcastState = { total: userIds.length, sent: 0, failed: 0, current: 0, startedAt: Date.now(), done: false, doneAt: null };
-
-          for (let i = 0; i < userIds.length; i++) {
-            const ok = await sendToUser(userIds[i]);
-            if (ok) sent++; else failed++;
-            broadcastState.current = i + 1;
-            broadcastState.sent    = sent;
-            broadcastState.failed  = failed;
-            if ((i + 1) % 100 === 0) {
-              const pct = ((( i + 1) / userIds.length) * 100).toFixed(1);
-              const bar = buildProgressBar(i + 1, userIds.length, 15);
-              await adminReply(bot, chatId,
-                `📊 ${bar} ${pct}%\n` +
-                `📤 <b>${i + 1}</b>/${userIds.length} — ✅ ${sent} | ❌ ${failed}`
-              );
-            }
-            await new Promise(r => setTimeout(r, 50));
-          }
-
-          broadcastState.done   = true;
-          broadcastState.doneAt = Date.now();
-          const duration = Math.floor((broadcastState.doneAt - broadcastState.startedAt) / 1000);
-
-          await adminReply(bot, chatId,
-                        `🎉 <b>Broadcast finished</b>\n\n` +
-            `${buildProgressBar(userIds.length, userIds.length, 15)} 100%\n\n` +
-                        `👥 Total: <b>${userIds.length}</b>\n` +
-                        `✅ Delivered: <b>${sent}</b>\n` +
-                        `❌ Failed: <b>${failed}</b>\n` +
-                        `⏱ Duration: <b>${formatEta(duration)}</b>`
-          );
+                    await runBroadcast(userIds, 'users');
         } catch (e) {
-          if (broadcastState) { broadcastState.done = true; broadcastState.doneAt = Date.now(); }
                     await adminReply(bot, chatId, `❌ Broadcast error: ${e.message}`);
-        }
+                }
+            } else if (mode === 'broadcast_channels') {
+                try {
+                    const channels   = await getChannelsList();
+                    const channelIds = Object.values(channels).map(c => c.id);
+                    if (!channelIds.length) {
+                        await adminReply(bot, chatId, `📭 No channels registered — nothing to send to.`);
+                    } else {
+                        await runBroadcast(channelIds, 'channels');
+                    }
+                } catch (e) {
+                    await adminReply(bot, chatId, `❌ Broadcast error: ${e.message}`);
+                }
       }
       return;
     }
