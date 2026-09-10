@@ -1176,43 +1176,43 @@ function startWelcomeBot() {
   bot.onText(/\/help/, async (msg) => {
     if (!isAdmin(msg)) return;
     await adminReply(bot, msg.chat.id,
-            `🐼 <b>${BOT_NAME} — Admin Panel</b>\n` +
+            `🐼 <b>${BOT_NAME} — لوحة تحكم الأدمن</b>\n` +
       `${'═'.repeat(32)}\n\n` +
-            `👋 <b>Basics</b>\n` +
-            `/start — Welcome message\n` +
-            `/help — Show all commands\n` +
-            `/my — Private control panel\n\n` +
-            `📊 <b>Info & Monitoring</b>\n` +
-            `/balance — TON wallet balance\n` +
-            `/queue — Status of all withdrawal queues\n` +
-            `/lastpaid — Last 5 paid transactions\n\n` +
-            `⚙️ <b>Withdrawal Settings</b>\n` +
-            `/setmax [TON] — Maximum automatic payout limit\n` +
-            `/setmin [TON] — Minimum withdrawal limit\n` +
-            `/setdaily [number] — Daily limit per user\n` +
-            `/setcooldown [hours] — Wait time after exceeding the limit\n\n` +
-            `👤 <b>User Management</b>\n` +
-            `/banwallet [address] — Ban a wallet\n` +
-            `/unwallet [address] — Unban a wallet\n\n` +
-            `📨 <b>Sending Messages</b>\n` +
-            `/sendmsg [userId] — Send a message to a user\n` +
-            `/broadcast — Send a message to everyone\n` +
-            `/broadcast_status — Broadcast status\n` +
-            `/broadcast_debug — Check users path\n` +
-            `/cancel — Cancel a message-sending session\n\n` +
-            `📡 <b>Channel Broadcast</b>\n` +
-            `/addchannel [id/@user] [label] — Add a channel\n` +
-            `/removechannel [id/@user] — Remove a channel\n` +
-            `/channels — List registered channels\n` +
-            `/sendchannel [id/@user] — Send a message to one channel\n` +
-            `/broadcast_channels — Send a message to all channels\n\n` +
-            `🕵️ <b>Fraud Detection</b>\n` +
-            `/check_suspicious — Detect shared wallets (+3 users)\n\n` +
-            `📊 <b>Referral Reports</b>\n` +
-            `/top_referrals — Top 50 users by total referrals\n\n` +
-            `🔴 <b>Full System Control</b>\n` +
-            `/stop_all — ⛔ Fully stop automatic withdrawals\n` +
-            `/start_all — ✅ Resume withdrawals`
+            `👋 <b>أساسيات</b>\n` +
+            `/start — رسالة الترحيب\n` +
+            `/help — عرض كل الأوامر\n` +
+            `/my — لوحة التحكم الخاصة\n\n` +
+            `📊 <b>معلومات ومتابعة</b>\n` +
+            `/balance — رصيد محفظة TON\n` +
+            `/queue — حالة كل طوابير السحب\n` +
+            `/lastpaid — آخر 5 عمليات دفع\n\n` +
+            `⚙️ <b>إعدادات السحب</b>\n` +
+            `/setmax [TON] — الحد الأقصى للسحب التلقائي\n` +
+            `/setmin [TON] — الحد الأدنى للسحب\n` +
+            `/setdaily [رقم] — الحد اليومي لكل مستخدم\n` +
+            `/setcooldown [ساعات] — وقت الانتظار بعد تجاوز الحد\n\n` +
+            `👤 <b>إدارة المستخدمين</b>\n` +
+            `/banwallet [العنوان] — حظر محفظة\n` +
+            `/unwallet [العنوان] — إلغاء حظر محفظة\n\n` +
+            `📨 <b>إرسال الرسائل</b>\n` +
+            `/sendmsg [userId] — إرسال رسالة لمستخدم\n` +
+            `/broadcast — إرسال رسالة لكل المستخدمين\n` +
+            `/broadcast_status — حالة الإذاعة الحالية\n` +
+            `/broadcast_debug — فحص مسار المستخدمين\n` +
+            `/cancel — إلغاء جلسة إرسال رسالة\n\n` +
+            `📡 <b>إذاعة القنوات</b>\n` +
+            `/addchannel [id/@اليوزر] [اسم] — إضافة قناة\n` +
+            `/removechannel [id/@اليوزر] — حذف قناة\n` +
+            `/channels — عرض القنوات المضافة\n` +
+            `/sendchannel [id/@اليوزر] — إرسال رسالة لقناة واحدة\n` +
+            `/broadcast_channels — إرسال رسالة لكل القنوات\n\n` +
+            `🕵️ <b>كشف الاحتيال</b>\n` +
+            `/check_suspicious — اكتشاف المحافظ المشتركة (+3 مستخدمين)\n\n` +
+            `📊 <b>تقارير الإحالة</b>\n` +
+            `/top_referrals — أفضل 50 مستخدم بعدد الإحالات\n\n` +
+            `🔴 <b>التحكم الكامل بالنظام</b>\n` +
+            `/stop_all — ⛔ إيقاف السحب التلقائي بالكامل\n` +
+            `/start_all — ✅ استئناف السحب`
     );
   });
 
@@ -1220,26 +1220,26 @@ function startWelcomeBot() {
   bot.onText(/\/my/, async (msg) => {
     if (!isAdmin(msg)) return;
     await adminReply(bot, msg.chat.id,
-            `🎛 <b>${BOT_NAME} — Private Control Panel</b>\n` +
+            `🎛 <b>${BOT_NAME} — لوحة التحكم الخاصة</b>\n` +
       `${'═'.repeat(32)}\n\n` +
-            `📊 <b>Statistics & Monitoring</b>\n` +
-            `/stats — Full statistics\n\n` +
-            `🔍 <b>User Info</b>\n` +
-            `/userinfo [userId] — Full user info\n` +
-            `/logs [userId] [30|100|200|all] — Activity log with rewards\n\n` +
-            `💸 <b>Withdrawal Management</b>\n` +
-            `/pending_wd — Review withdrawals needing manual approval\n` +
-            `/awaiting_queue — Withdrawals pending due to the daily limit/approval\n` +
-            `/unlock [count] — Release a number of pending withdrawals for payout\n` +
-            `/retryall — Retry failed withdrawals\n\n` +
-            `👤 <b>User Management</b>\n` +
-            `/banuser [userId] — Ban a user\n` +
-            `/unbanuser [userId] — Unban a user\n\n` +
-            `💎 <b>Add Balance</b>\n` +
-            `/addton [userId] [amount] — Add TON\n\n` +
-            `⚙️ <b>Price Settings</b>\n` +
-            `/setrate [number] — Bamboo→TON price\n` +
-            `/mode — Current mode Batch/Single`
+            `📊 <b>الإحصائيات والمتابعة</b>\n` +
+            `/stats — إحصائيات كاملة\n\n` +
+            `🔍 <b>معلومات المستخدم</b>\n` +
+            `/userinfo [userId] — معلومات كاملة عن المستخدم\n` +
+            `/logs [userId] [30|100|200|all] — سجل النشاط مع المكافآت\n\n` +
+            `💸 <b>إدارة السحوبات</b>\n` +
+            `/pending_wd — مراجعة السحوبات المحتاجة موافقة يدوية\n` +
+            `/awaiting_queue — سحوبات معلقة بسبب الحد اليومي/الموافقة\n` +
+            `/unlock [عدد] — تحرير عدد من السحوبات المعلقة للدفع\n` +
+            `/retryall — إعادة محاولة السحوبات الفاشلة\n\n` +
+            `👤 <b>إدارة المستخدمين</b>\n` +
+            `/banuser [userId] — حظر مستخدم\n` +
+            `/unbanuser [userId] — إلغاء حظر مستخدم\n\n` +
+            `💎 <b>إضافة رصيد</b>\n` +
+            `/addton [userId] [الكمية] — إضافة TON\n\n` +
+            `⚙️ <b>إعدادات السعر</b>\n` +
+            `/setrate [رقم] — سعر تحويل Bamboo→TON\n` +
+            `/mode — الوضع الحالي دفعات/فردي`
     );
   });
 
@@ -2147,6 +2147,16 @@ function startWelcomeBot() {
     return String(id).replace(/[.$#[\]/]/g, '_');
   }
 
+  // Accepts "aborabie741", "@aborabie741", "-1001234567890", or a t.me link and
+  // normalizes it into a chat_id Telegram's API will accept (usernames need a leading @).
+  function normalizeChannelTarget(raw) {
+    let id = String(raw || '').trim();
+    const tMeMatch = id.match(/t\.me\/([A-Za-z0-9_]+)/i);
+    if (tMeMatch) id = tMeMatch[1];
+    if (id.startsWith('@') || id.startsWith('-') || /^\d+$/.test(id)) return id;
+    return '@' + id;
+  }
+
   async function getChannelsList() {
     const snap = await db.ref('broadcastChannels').once('value');
     return snap.exists() ? snap.val() : {};
@@ -2186,7 +2196,7 @@ function startWelcomeBot() {
   // ─── Channel broadcast management ──────────────────────
   bot.onText(/^\/addchannel(?:\s+(\S+))?(?:\s+([\s\S]+))?$/, async (msg, match) => {
     if (!isAdmin(msg)) { await unauth(msg); return; }
-    const channelId = match && match[1] ? match[1].trim() : null;
+    const channelId = match && match[1] ? normalizeChannelTarget(match[1]) : null;
     const label     = match && match[2] ? match[2].trim() : null;
     if (!channelId) {
             await adminReply(bot, msg.chat.id, `❌ Usage: /addchannel [channelId or @username] [optional label]\nExample: /addchannel @MyChannel My Channel`);
@@ -2211,7 +2221,7 @@ function startWelcomeBot() {
 
   bot.onText(/^\/removechannel(?:\s+(\S+))?$/, async (msg, match) => {
     if (!isAdmin(msg)) { await unauth(msg); return; }
-    const channelId = match && match[1] ? match[1].trim() : null;
+    const channelId = match && match[1] ? normalizeChannelTarget(match[1]) : null;
     if (!channelId) {
             await adminReply(bot, msg.chat.id, `❌ Usage: /removechannel [channelId or @username]`);
       return;
@@ -2251,7 +2261,7 @@ function startWelcomeBot() {
 
   bot.onText(/^\/sendchannel(?:\s+(\S+))?$/, async (msg, match) => {
     if (!isAdmin(msg)) { await unauth(msg); return; }
-    const channelId = match && match[1] ? match[1].trim() : null;
+    const channelId = match && match[1] ? normalizeChannelTarget(match[1]) : null;
     if (!channelId) {
             await adminReply(bot, msg.chat.id, `❌ Usage: /sendchannel [channelId or @username]\nExample: /sendchannel @MyChannel`);
       return;
@@ -2459,8 +2469,8 @@ function startWelcomeBot() {
           } else {
             await bot.sendMessage(uid, msgText, { parse_mode: 'HTML', disable_web_page_preview: true, ...(replyMarkup ? { reply_markup: replyMarkup } : {}) });
           }
-          return true;
-        } catch (e) { return false; }
+                    return { ok: true };
+                } catch (e) { return { ok: false, error: e.message }; }
       }
 
       async function runBroadcast(ids, label) {
@@ -2473,8 +2483,8 @@ function startWelcomeBot() {
                     broadcastState = { total: ids.length, sent: 0, failed: 0, current: 0, startedAt: Date.now(), done: false, doneAt: null, label };
 
           for (let i = 0; i < ids.length; i++) {
-                        const ok = await sendToTarget(ids[i]);
-            if (ok) sent++; else failed++;
+                        const result = await sendToTarget(ids[i]);
+                        if (result.ok) sent++; else failed++;
             broadcastState.current = i + 1;
             broadcastState.sent    = sent;
             broadcastState.failed  = failed;
@@ -2508,18 +2518,18 @@ function startWelcomeBot() {
       }
 
       if (mode === 'user') {
-                const ok = await sendToTarget(target);
+                const result = await sendToTarget(target);
         await adminReply(bot, chatId,
-          ok
+                    result.ok
                         ? `✅ <b>Message sent successfully</b> to user <code>${escapeHtml(target)}</code>`
-                        : `❌ <b>Sending failed</b> for user <code>${escapeHtml(target)}</code> — check the chat ID`
+                        : `❌ <b>Sending failed</b> for user <code>${escapeHtml(target)}</code>\n⚠️ ${escapeHtml(result.error)}`
         );
             } else if (mode === 'channel') {
-                const ok = await sendToTarget(target);
+                const result = await sendToTarget(target);
                 await adminReply(bot, chatId,
-                    ok
+                    result.ok
                         ? `✅ <b>Message sent successfully</b> to channel <code>${escapeHtml(target)}</code>`
-                        : `❌ <b>Sending failed</b> for channel <code>${escapeHtml(target)}</code> — check the ID and that the bot is an admin there`
+                        : `❌ <b>Sending failed</b> for channel <code>${escapeHtml(target)}</code>\n⚠️ ${escapeHtml(result.error)}\n💡 Make sure the ID/username is correct and the bot is an admin there`
                 );
             } else if (mode === 'broadcast_users') {
         try {
